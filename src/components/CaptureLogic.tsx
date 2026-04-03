@@ -1,40 +1,34 @@
 "use client";
 
 import { AppSettings } from "@/types";
-import { AetherProvider, OCRResult } from "../services/AetherProvider";
-import { TesseractProvider } from "../services/TesseractProvider";
+import { TesseractEngine, TesseractResult } from "../engines/TesseractEngine";
+import { OllamaEngine, OllamaResult } from "../engines/OllamaEngine";
 
-/**
- * ZenLens Vision Dispatcher (v30.12)
- * Manages the high-fidelity framing and directs requests to either 
- * the Aether (AI) or Tesseract (Local) providers based strictly on settings.
- */
 export interface CaptureResult {
   dataUrl: string;
   isBlack: boolean;
 }
 
+export interface OCRResult {
+  text: string;
+  confidence: number;
+}
+
 export class CaptureService {
-  /**
-   * Main Dispatcher (v30.12): No more automatic fallback.
-   * If you select Ollama, we only run Ollama. If it fails, that's your log.
-   */
   static async performOCR(imageSrc: string, settings: AppSettings): Promise<OCRResult> {
-    if (!imageSrc || imageSrc === "data:,") return { text: "", confidence: 0 };
+    if (!imageSrc || imageSrc === "data:,") {
+      return { text: "", confidence: 0 };
+    }
     
-    // Dispatch to the selected provider ONLY
-    if (settings.ocrEngine === 'ollama' && settings.ollamaVisionModel) {
-      console.log(`[ZenLens] Dispatched to AETHER (Model: ${settings.ollamaVisionModel})`);
-      return await AetherProvider.performOCR(imageSrc, settings.ollamaVisionModel);
+    if (settings.ocrEngine === 'ollama') {
+      const result: OllamaResult = await OllamaEngine.performOCR(imageSrc, settings.ollamaVisionModel);
+      return { text: result.text, confidence: result.confidence };
     } else {
-      console.log(`[ZenLens] Dispatched to TESSERACT (Local Engine)`);
-      return await TesseractProvider.performOCR(imageSrc, settings.sourceLanguage);
+      const result: TesseractResult = await TesseractEngine.performOCR(imageSrc, settings.sourceLanguage);
+      return { text: result.text, confidence: result.confidence };
     }
   }
 
-  /**
-   * High-Fidelity Crystal Capture Frame
-   */
   static captureFrame(
     video: HTMLVideoElement, 
     canvas: HTMLCanvasElement, 
@@ -57,11 +51,9 @@ export class CaptureService {
       sh = Math.min(sh, video.videoHeight - sy);
     }
 
-    // [ZenLens 30.11] Aether Optimizer:
-    // Scale image for AI (1024px max) to prevent bandwidth bottleneck
-    const aiScale = isAether ? Math.min(1.0, 1024 / sw) : 2.0;
-    canvas.width = Math.max(64, sw * aiScale); 
-    canvas.height = Math.max(64, sh * aiScale);
+    const aiScale = isAether ? Math.min(1.0, 1024 / sw) : 1.0;
+    canvas.width = Math.max(64, Math.round(sw * aiScale)); 
+    canvas.height = Math.max(64, Math.round(sh * aiScale));
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     
@@ -69,10 +61,8 @@ export class CaptureService {
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     
-    // [ZenLens 30.18] Relaxed Mode: Force PNG for better WASM compatibility
     const dataUrl = canvas.toDataURL('image/png');
 
-    // Black Frame Detection & In-App Alerts
     const sampleSize = 20;
     const checkData = context.getImageData(0, 0, sampleSize, sampleSize).data;
     let totalBrightness = 0;

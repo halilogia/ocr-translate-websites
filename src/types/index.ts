@@ -8,7 +8,6 @@ export interface Translation {
 }
 
 export interface AppSettings {
-  translationMode: boolean;
   sourceLanguage: string;
   targetLanguage: string;
   engine: 'google' | 'mymemory' | 'ollama' | 'openrouter';
@@ -18,6 +17,7 @@ export interface AppSettings {
   furigana: boolean;
   ollamaModel: string;
   ollamaVisionModel: string;
+  ollamaTranslationModel: string;
   openRouterKey: string;
   openRouterModel: string;
   ocrApiKey: string;

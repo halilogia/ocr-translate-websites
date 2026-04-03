@@ -1,23 +1,15 @@
 import { CaptureService } from "@/components/CaptureLogic";
 
-jest.mock("tesseract.js", () => ({
-  createWorker: jest.fn().mockImplementation(() => ({
-    recognize: jest.fn().mockResolvedValue({
-      data: { text: "Hello World", confidence: 90 }
-    }),
-    terminate: jest.fn().mockResolvedValue(null)
-  }))
-}));
-
-jest.mock("@/services/AetherProvider", () => ({
-  AetherProvider: {
-    performOCR: jest.fn().mockResolvedValue({ text: "AI Result", confidence: 100 })
+jest.mock("@/engines/TesseractEngine", () => ({
+  TesseractEngine: {
+    performOCR: jest.fn().mockResolvedValue({ text: "Hello World", confidence: 90 }),
+    cleanup: jest.fn()
   }
 }));
 
-jest.mock("@/services/TesseractProvider", () => ({
-  TesseractProvider: {
-    performOCR: jest.fn().mockResolvedValue({ text: "Hello World", confidence: 90 })
+jest.mock("@/engines/OllamaEngine", () => ({
+  OllamaEngine: {
+    performOCR: jest.fn().mockResolvedValue({ text: "AI Result", confidence: 100 })
   }
 }));
 
@@ -26,7 +18,7 @@ describe("CaptureService", () => {
     jest.clearAllMocks();
   });
 
-  test("performOCR should return text and confidence", async () => {
+  test("performOCR should return text and confidence with Tesseract", async () => {
     const mockSettings = {
       ocrEngine: 'tesseract' as const,
       sourceLanguage: 'eng',
@@ -40,7 +32,8 @@ describe("CaptureService", () => {
       ollamaModel: '',
       openRouterKey: '',
       openRouterModel: '',
-      ocrApiKey: ''
+      ocrApiKey: '',
+      isGameMode: false
     };
     const result = await CaptureService.performOCR("data:image/png;base64,mock", mockSettings);
     expect(result.text).toBe("Hello World");
@@ -71,7 +64,8 @@ describe("CaptureService", () => {
       ollamaModel: '',
       openRouterKey: '',
       openRouterModel: '',
-      ocrApiKey: ''
+      ocrApiKey: '',
+      isGameMode: false
     };
     const result = await CaptureService.performOCR("", mockSettings);
     expect(result.text).toBe("");
@@ -137,7 +131,7 @@ describe("CaptureService", () => {
     expect(result.dataUrl).toContain("data:image/png;base64");
   });
 
-  test("performOCR should dispatch to Aether when ollama engine selected", async () => {
+  test("performOCR should dispatch to Ollama when ollama engine selected", async () => {
     const mockSettings = {
       ocrEngine: 'ollama' as const,
       sourceLanguage: 'eng',
@@ -151,7 +145,8 @@ describe("CaptureService", () => {
       ollamaModel: '',
       openRouterKey: '',
       openRouterModel: '',
-      ocrApiKey: ''
+      ocrApiKey: '',
+      isGameMode: false
     };
     
     const result = await CaptureService.performOCR("data:image/png;base64,mock", mockSettings);

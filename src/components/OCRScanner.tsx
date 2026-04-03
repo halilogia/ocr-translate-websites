@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useRef, useEffect, forwardRef, useImperativeHandle, useState, useCallback } from "react";
 import { AppSettings } from "@/types";
 import { CaptureService } from "./CaptureLogic";
+import ErrorPopup from "./ui/ErrorPopup";
+import { OCRError } from "../engines/TesseractEngine";
 
 interface OCRScannerProps {
   settings: AppSettings;
@@ -24,6 +26,11 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<{ title: string; message: string; details?: string } | null>(null);
+
+  const showError = useCallback((title: string, message: string, details?: string) => {
+    setError({ title, message, details });
+  }, []);
 
   useImperativeHandle(ref, () => ({
     selectWindow: async () => {
@@ -40,7 +47,6 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           
-          // [ZenLens 30.17] Dynamic Mirroring
           videoRef.current.onloadedmetadata = () => {
             const video = videoRef.current;
             if (video) {
@@ -56,8 +62,13 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
             setIsStreamActive(false);
           };
         }
-      } catch (err) {
-        console.error("Display Media Error:", err);
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        showError(
+          'Screen Capture Failed',
+          'Could not capture the selected window',
+          errorMsg
+        );
       }
     },
     openFileUpload: () => {
@@ -88,17 +99,30 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
               return;
             }
 
-            console.log(`[ZenLens] TICK: Dispatched to ${settings.ocrEngine.toUpperCase()}...`);
             const result = await CaptureService.performOCR(dataUrl, settings);
             
             if (result.text && result.text.length > 3) {
-              console.log(`[ZenLens] ${settings.ocrEngine.toUpperCase()} SUCCESS: "${result.text.slice(0, 30)}..." (${result.confidence}%)`);
+              console.log(`[ZenLens] ${settings.ocrEngine.toUpperCase()} SUCCESS: "${result.text.slice(0, 50)}..." (${result.confidence}%)`);
               onTranscript(result.text);
             }
           }
         }
       } catch (err: unknown) {
-        console.error(`[ZenLens] PIPELINE ERROR:`, err);
+        const ocrError = err as OCRError;
+        
+        if (ocrError.code) {
+          showError(
+            ocrError.message,
+            ocrError.details || 'An error occurred during OCR processing'
+          );
+        } else {
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+          showError(
+            'OCR Pipeline Error',
+            'An unexpected error occurred during text recognition',
+            errorMsg
+          );
+        }
       }
       
       if (active) {
@@ -125,7 +149,12 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
         const result = await CaptureService.performOCR(dataUrl, settings);
         if (result.text) onTranscript(result.text);
       } catch (err: unknown) { 
-        console.error("File OCR Error:", err); 
+        const ocrError = err as OCRError;
+        if (ocrError.code) {
+          showError(ocrError.message, ocrError.details || 'File OCR failed');
+        } else {
+          showError('File OCR Error', 'Could not process the selected image');
+        }
       }
     };
     reader.readAsDataURL(file);
@@ -133,9 +162,6 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
 
   return (
     <>
-      {/* [ZenLens 30.15] Visible Ghost Strategy: 
-          Placing at 0,0 with near-zero opacity to force the GPU 
-          to keep the rendering buffer active on Linux/Mint. */}
       <video 
         ref={videoRef} 
         style={{ 
@@ -153,7 +179,22 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
         muted 
       />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
-      <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        accept="image/*" 
+        onChange={handleFileChange} 
+      />
+      
+      {error && (
+        <ErrorPopup
+          title={error.title}
+          message={error.message}
+          details={error.details}
+          onClose={() => setError(null)}
+        />
+      )}
     </>
   );
 });

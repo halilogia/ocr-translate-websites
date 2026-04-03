@@ -53,113 +53,100 @@ export default function SettingsTray({ settings, updateSettings }: SettingsTrayP
 
   return (
     <div className="glass settings-tray fade-in" style={{
-      padding: '20px 32px',
+      padding: '12px 24px',
       display: 'flex',
-      flexDirection: 'column',
-      gap: '20px',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: '24px',
       zIndex: 100,
       background: 'rgba(5, 5, 5, 0.95)',
-      border: '2px solid rgba(255, 255, 255, 0.3)',
-      borderRadius: '24px',
+      border: '1px solid rgba(255, 255, 255, 0.15)',
+      borderRadius: '20px',
       backdropFilter: 'blur(60px) saturate(200%)',
       boxShadow: '0 25px 80px rgba(0, 0, 0, 0.9)',
       width: 'fit-content',
       pointerEvents: 'auto'
     }}>
-      {/* ROW 1: TRANSLATION SETTINGS */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '20px' }}>
-          <ZenSelect 
-            label="SOURCE"
-            value={settings.sourceLanguage}
-            options={sourceOptions}
-            onChange={(val) => updateSettings({ sourceLanguage: val })}
-          />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <ZenSelect 
+          label="SOURCE"
+          value={settings.sourceLanguage}
+          options={sourceOptions}
+          onChange={(val) => updateSettings({ sourceLanguage: val })}
+        />
 
-          <div style={{ color: '#fff', fontSize: '14px', opacity: 0.5, fontWeight: 900, height: '40px', display: 'grid', placeItems: 'center' }}>→</div>
+        <div style={{ color: '#fff', fontSize: '14px', opacity: 0.3, fontWeight: 900 }}>→</div>
 
-          <ZenSelect 
-            label="TARGET"
-            value={settings.targetLanguage}
-            options={targetOptions}
-            onChange={(val) => updateSettings({ targetLanguage: val })}
-          />
-        </div>
+        <ZenSelect 
+          label="TARGET"
+          value={settings.targetLanguage}
+          options={targetOptions}
+          onChange={(val) => updateSettings({ targetLanguage: val })}
+        />
 
-        <div style={{ height: '32px', width: '2px', background: 'rgba(255, 255, 255, 0.1)', marginTop: '20px' }} />
+        <div style={{ height: '24px', width: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
 
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '20px' }}>
-          <ZenSelect 
-            label="TL ENGINE"
-            value={settings.engine}
-            options={engineOptions}
-            onChange={(val) => updateSettings({ engine: val as any })}
-          />
-          {settings.engine === 'ollama' && (
-            ollamaOptions.length > 0 ? (
-              <ZenSelect 
-                label="OLLAMA MODEL"
-                value={settings.ollamaModel}
-                options={ollamaOptions}
-                onChange={(val) => updateSettings({ ollamaModel: val })}
-              />
-            ) : (
-              <input 
-                className="minimal-input"
-                placeholder="Model: llama3" 
-                value={settings.ollamaModel || ''} 
-                onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
-              />
-            )
-          )}
-          {settings.engine === 'openrouter' && (
-            <input 
-              type="password"
-              className="minimal-input"
-              placeholder="OpenRouter API Key" 
-              value={settings.openRouterKey || ''} 
-              onChange={(e) => updateSettings({ openRouterKey: e.target.value })}
+        <ZenSelect 
+          label="TRANSLATE ENGINE"
+          value={settings.engine}
+          options={engineOptions}
+          onChange={(val) => updateSettings({ engine: val as any })}
+        />
+
+        <div style={{ height: '24px', width: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+
+        <ZenSelect 
+          label="VISION"
+          value={settings.ocrEngine}
+          options={ocrOptions}
+          onChange={(val) => updateSettings({ ocrEngine: val as any })}
+        />
+
+        {settings.ocrEngine === 'ollama' && (
+          ollamaOptions.length > 0 ? (
+            <ZenSelect 
+              label="VISION MODEL"
+              value={settings.ollamaVisionModel}
+              options={ollamaOptions}
+              onChange={(val) => updateSettings({ ollamaVisionModel: val })}
             />
-          )}
-        </div>
-      </div>
-
-      {/* ROW 2: VISION SETTINGS */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '28px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '20px' }}>
-          <ZenSelect 
-            label="VISION ENGINE (OCR)"
-            value={settings.ocrEngine}
-            options={ocrOptions}
-            onChange={(val) => updateSettings({ ocrEngine: val as any })}
-          />
-          {settings.ocrEngine === 'ollama' && (
-            ollamaOptions.length > 0 ? (
-              <ZenSelect 
-                label="OLLAMA VISION MODEL"
-                value={settings.ollamaVisionModel}
-                options={ollamaOptions}
-                onChange={(val) => updateSettings({ ollamaVisionModel: val })}
-              />
-            ) : (
-              <input 
-                className="minimal-input"
-                placeholder="Vision: llava" 
-                value={settings.ollamaVisionModel || ''} 
-                onChange={(e) => updateSettings({ ollamaVisionModel: e.target.value })}
-              />
-            )
-          )}
-          {settings.ocrEngine === 'ocrspace' && (
+          ) : (
             <input 
-              type="password"
               className="minimal-input"
-              placeholder="OCR.space API Key" 
-              value={settings.ocrApiKey || ''} 
-              onChange={(e) => updateSettings({ ocrApiKey: e.target.value })}
+              placeholder="Vision Model: translategemma" 
+              value={settings.ollamaVisionModel || ''} 
+              onChange={(e) => updateSettings({ ollamaVisionModel: e.target.value })}
             />
-          )}
-        </div>
+          )
+        )}
+
+        {settings.engine === 'ollama' && (
+          ollamaOptions.length > 0 ? (
+            <ZenSelect 
+              label="TRANSLATE MODEL"
+              value={settings.ollamaTranslationModel}
+              options={ollamaOptions}
+              onChange={(val) => updateSettings({ ollamaTranslationModel: val })}
+            />
+          ) : (
+            <input 
+              className="minimal-input"
+              placeholder="Translate Model: translategemma" 
+              value={settings.ollamaTranslationModel || ''} 
+              onChange={(e) => updateSettings({ ollamaTranslationModel: e.target.value })}
+            />
+          )
+        )}
+
+        {settings.engine === 'openrouter' && (
+          <input 
+            type="password"
+            className="minimal-input"
+            placeholder="OpenRouter Key" 
+            value={settings.openRouterKey || ''} 
+            onChange={(e) => updateSettings({ openRouterKey: e.target.value })}
+          />
+        )}
       </div>
 
       <style jsx>{`

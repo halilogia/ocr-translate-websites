@@ -25,7 +25,7 @@ export class AetherProvider {
         body: JSON.stringify({
           image: imageSrc,
           model: model,
-          prompt: "OCR: Extract all text from this image accurately. Output only the found text without any descriptions or headers."
+          prompt: "Extract all visible text from this image. Output ONLY the raw text found, maintaining original line breaks. Do not add descriptions, headers, or explanations. If text is unclear, output what you can read."
         }),
         signal: controller.signal
       });

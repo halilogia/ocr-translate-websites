@@ -19,12 +19,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
     }
 
+    const base64Data = image.includes(',') ? image.split(',')[1] : image;
+    
     const response = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: model,
         prompt: prompt,
-        images: [image.split(',')[1] || image],
+        images: [base64Data],
         stream: false
       })
     });

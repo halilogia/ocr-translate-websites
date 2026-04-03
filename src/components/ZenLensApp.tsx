@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   furigana: false,
   ollamaModel: '',
   ollamaVisionModel: '',
+  ollamaTranslationModel: '',
   openRouterKey: '',
   openRouterModel: '',
   ocrApiKey: '',
@@ -64,17 +65,145 @@ export default function ZenLensApp() {
     setSettings(prev => ({ ...prev, ...newSettings }));
   }, []);
 
-  const addTranscript = useCallback((text: string) => {
+  const [lastProcessedText, setLastProcessedText] = useState<string>('');
+  const [lastProcessedTime, setLastProcessedTime] = useState<number>(0);
+  const transcriptHistoryRef = useRef<string[]>([]);
+
+  const textSimilarity = (a: string, b: string): number => {
+    const longer = a.length > b.length ? a : b;
+    const shorter = a.length > b.length ? b : a;
+    if (longer.length === 0) return 1.0;
+    const editDist = (s1: string, s2: string): number => {
+      const matrix: number[][] = [];
+      for (let i = 0; i <= s2.length; i++) matrix[i] = [i];
+      for (let j = 0; j <= s1.length; j++) matrix[0][j] = j;
+      for (let i = 1; i <= s2.length; i++) {
+        for (let j = 1; j <= s1.length; j++) {
+          if (s2[i-1] === s1[j-1]) matrix[i][j] = matrix[i-1][j-1];
+          else matrix[i][j] = Math.min(matrix[i-1][j-1]+1, matrix[i][j-1]+1, matrix[i-1][j]+1);
+        }
+      }
+      return matrix[s2.length][s1.length];
+    };
+    return (longer.length - editDist(longer, shorter)) / longer.length;
+  };
+
+  const addTranscript = useCallback(async (text: string) => {
     if (!text.trim()) return;
+    
+    const trimmedText = text.trim();
+    const now = Date.now();
+    
+    // 1. Exact duplicate check against last processed
+    if (trimmedText === lastProcessedText) {
+      return;
+    }
+    
+    // 2. Similarity check: if text is >85% similar to last AND within 10 seconds, skip
+    if (lastProcessedText && (now - lastProcessedTime < 10000)) {
+      const similarity = textSimilarity(trimmedText, lastProcessedText);
+      if (similarity > 0.85) {
+        console.log(`[ZenLens] Duplicate filtered (${Math.round(similarity*100)}% similar)`);
+        return;
+      }
+    }
+    
+    // 3. Check against history using ref
+    const isDuplicate = transcriptHistoryRef.current.some(existingText => {
+      return textSimilarity(trimmedText, existingText) > 0.9;
+    });
+    if (isDuplicate) {
+      console.log('[ZenLens] Duplicate filtered (found in history)');
+      return;
+    }
+    
+    // Update tracking
+    setLastProcessedText(trimmedText);
+    setLastProcessedTime(now);
+    transcriptHistoryRef.current = [...transcriptHistoryRef.current, trimmedText].slice(-20);
+    
+    // Add transcript
     setTranscripts(prev => {
       const newLine: TranscriptLine = {
         id: Date.now().toString(),
-        text: text.trim(),
-        timestamp: Date.now()
+        text: trimmedText,
+        timestamp: now
       };
       return [...prev, newLine].slice(-10);
     });
-  }, []);
+    if (isDuplicate) {
+      console.log('[ZenLens] Duplicate filtered (found in history)');
+      return;
+    }
+    
+    // Update tracking
+    setLastProcessedText(trimmedText);
+    setLastProcessedTime(now);
+    
+    // Add transcript
+    setTranscripts(prev => {
+      const newLine: TranscriptLine = {
+        id: Date.now().toString(),
+        text: trimmedText,
+        timestamp: now
+      };
+      return [...prev, newLine].slice(-10);
+    });
+    
+    // Translation
+    if (settings.engine) {
+      try {
+        const fromLang = settings.sourceLanguage === 'eng' ? 'en' : 
+                        settings.sourceLanguage === 'jpn' ? 'ja' :
+                        settings.sourceLanguage === 'kor' ? 'ko' :
+                        settings.sourceLanguage === 'tur' ? 'tr' :
+                        settings.sourceLanguage.substring(0, 2);
+        
+        const toLang = settings.targetLanguage === 'tr' ? 'tr' : 
+                      settings.targetLanguage === 'en' ? 'en' :
+                      settings.targetLanguage === 'de' ? 'de' :
+                      settings.targetLanguage.substring(0, 2);
+        
+        const payload = {
+          text: trimmedText,
+          from: fromLang,
+          to: toLang,
+          engine: settings.engine,
+          ollamaModel: settings.ollamaTranslationModel || settings.ollamaVisionModel,
+          openRouterKey: settings.openRouterKey,
+          openRouterModel: settings.openRouterModel
+        };
+
+        console.log('[ZenLens] Translation Payload:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.translatedText) {
+            setTranscripts(prev => {
+              const updated = prev.map(t => 
+                t.text === trimmedText 
+                  ? { ...t, text: `${trimmedText}\n→ ${data.translatedText}` }
+                  : t
+              );
+              return updated;
+            });
+          }
+        } else {
+          const errorData = await response.json();
+          console.error('[ZenLens] Translation API Error:', errorData);
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[ZenLens] Translation failed:', errorMessage);
+      }
+    }
+  }, [settings.engine, settings.sourceLanguage, settings.targetLanguage, settings.ollamaTranslationModel, settings.openRouterKey, settings.openRouterModel, lastProcessedText, lastProcessedTime]);
 
   if (!mounted) return null;
 
