@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume2, Copy, Sparkles, Monitor, CloudUpload, Zap } from "lucide-react";
+import { Volume2, Copy, Sparkles, Monitor, CloudUpload, Zap, Target } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface TranslationDisplayProps {
@@ -11,6 +11,7 @@ interface TranslationDisplayProps {
   onSpeak: (text: string) => void;
   onSelectWindow: () => void;
   onUploadImage: () => void;
+  onDefineRegion: () => void;
 }
 
 export default function TranslationDisplay({ 
@@ -20,7 +21,8 @@ export default function TranslationDisplay({
   onCopy, 
   onSpeak, 
   onSelectWindow, 
-  onUploadImage 
+  onUploadImage,
+  onDefineRegion
 }: TranslationDisplayProps) {
   const lines = text ? text.split('\n').filter(l => l.trim()) : [];
 
@@ -139,7 +141,7 @@ export default function TranslationDisplay({
                 Ghost Mode Active
               </h2>
               <p style={{ color: 'var(--foreground-muted)', fontSize: '1.15rem', lineHeight: 1.6, fontWeight: 500 }}>
-                Kamui is silently monitoring your game window. <br/>
+                ZenLens is silently monitoring your game window. <br/>
                 Translations will appear here instantly when text is detected.
               </p>
             </div>
@@ -150,7 +152,25 @@ export default function TranslationDisplay({
                 className="glass hover-glow"
                 style={{ padding: '16px 32px', borderRadius: '16px', fontSize: '14px', fontWeight: 700, background: 'rgba(255,255,255,0.05)' }}
               >
-                Change Target Window
+                Change Window
+              </button>
+              <button 
+                onClick={onDefineRegion}
+                className="glass hover-glow"
+                style={{ 
+                  padding: '16px 32px', 
+                  borderRadius: '16px', 
+                  fontSize: '14px', 
+                  fontWeight: 700, 
+                  background: 'rgba(0, 245, 212, 0.1)',
+                  color: 'var(--accent)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+              >
+                <Target size={18} />
+                Define Scan Region
               </button>
             </div>
           </motion.div>
@@ -182,7 +202,7 @@ export default function TranslationDisplay({
               <Zap size={40} color="white" />
             </div>
             <div style={{ maxWidth: '500px' }}>
-              <h1 style={{ fontSize: '3.5rem', fontWeight: 900, marginBottom: '16px', letterSpacing: '-0.04em' }}>Welcome to Kamui</h1>
+              <h1 style={{ fontSize: '3.5rem', fontWeight: 900, marginBottom: '16px', letterSpacing: '-0.04em' }}>Welcome to ZenLens</h1>
               <p style={{ color: 'var(--foreground-muted)', fontSize: '1.25rem', lineHeight: 1.6, fontWeight: 500 }}>
                 The ultimate tool for real-time game translation. Select a source to begin your experience.
               </p>

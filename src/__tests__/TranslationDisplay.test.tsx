@@ -18,7 +18,7 @@ describe('TranslationDisplay Component', () => {
         onUploadImage={mockOnUploadImage}
       />
     );
-    expect(screen.getByText(/Welcome to Kamui/i)).toBeInTheDocument();
+    expect(screen.getByText(/Welcome to ZenLens/i)).toBeInTheDocument();
   });
 
   it('shows capture window and upload image action cards', () => {

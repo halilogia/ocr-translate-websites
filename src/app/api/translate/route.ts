@@ -40,7 +40,7 @@ export async function POST(req: Request) {
           'Authorization': `Bearer ${openRouterKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'Kamui Translator'
+          'X-Title': 'ZenLens'
         },
         body: JSON.stringify({
           model: openRouterModel || 'neversleep/llama-3-lumimaid-8b:extended',

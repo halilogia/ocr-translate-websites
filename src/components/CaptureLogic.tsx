@@ -1,123 +1,103 @@
 "use client";
 
-import { createWorker, Worker } from "tesseract.js";
-import { TesseractWorker, OCRResult } from "@/types";
+import { AppSettings } from "@/types";
+import { AetherProvider, OCRResult } from "../services/AetherProvider";
+import { TesseractProvider } from "../services/TesseractProvider";
+
+/**
+ * ZenLens Vision Dispatcher (v30.12)
+ * Manages the high-fidelity framing and directs requests to either 
+ * the Aether (AI) or Tesseract (Local) providers based strictly on settings.
+ */
+export interface CaptureResult {
+  dataUrl: string;
+  isBlack: boolean;
+}
 
 export class CaptureService {
-  private static currentLang: string = 'eng';
-  private static worker: any = null;
-
-  static async getWorker(lang: string = 'eng'): Promise<Worker> {
-    if (this.worker && this.currentLang === lang) return this.worker;
-    
-    if (this.worker) await this.terminateWorker();
-    
-    const worker = await createWorker(lang, 1);
-    this.worker = worker;
-    this.currentLang = lang;
-    return worker;
-  }
-
-  static async terminateWorker(): Promise<void> {
-    if (this.worker) {
-      await this.worker.terminate();
-      this.worker = null;
-    }
-  }
-
-  static async performOCR(imageSrc: string, lang: string = 'eng'): Promise<OCRResult> {
+  /**
+   * Main Dispatcher (v30.12): No more automatic fallback.
+   * If you select Ollama, we only run Ollama. If it fails, that's your log.
+   */
+  static async performOCR(imageSrc: string, settings: AppSettings): Promise<OCRResult> {
     if (!imageSrc || imageSrc === "data:,") return { text: "", confidence: 0 };
     
-    try {
-      const worker = await this.getWorker(lang);
-      
-      // Auto Page Segmentation for Game UIs
-      await worker.setParameters({
-        tessedit_pageseg_mode: '3' as any, // PSM 3: Fully automatic segmentation
-        tessjs_create_hocr: '0',
-        tessjs_create_tsv: '0',
-      });
-
-      const { data: { text, confidence } } = await worker.recognize(imageSrc);
-      return { text: text || "", confidence };
-    } catch (err) {
-      console.error("OCR Service Error:", err);
-      return { text: "", confidence: 0 };
+    // Dispatch to the selected provider ONLY
+    if (settings.ocrEngine === 'ollama' && settings.ollamaVisionModel) {
+      console.log(`[ZenLens] Dispatched to AETHER (Model: ${settings.ollamaVisionModel})`);
+      return await AetherProvider.performOCR(imageSrc, settings.ollamaVisionModel);
+    } else {
+      console.log(`[ZenLens] Dispatched to TESSERACT (Local Engine)`);
+      return await TesseractProvider.performOCR(imageSrc, settings.sourceLanguage);
     }
   }
 
-  static captureFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): string | null {
-    if (!video || !canvas || video.videoWidth === 0 || video.videoHeight === 0) return null;
-    
+  /**
+   * High-Fidelity Crystal Capture Frame
+   */
+  static captureFrame(
+    video: HTMLVideoElement, 
+    canvas: HTMLCanvasElement, 
+    region?: { x: number, y: number, width: number, height: number },
+    isAether: boolean = false
+  ): CaptureResult {
     const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return null;
+    if (!context) return { dataUrl: "", isBlack: true };
 
-    // Use 3x scaling for high-precision game text
-    const scale = 3;
-    canvas.width = video.videoWidth * scale;
-    canvas.height = video.videoHeight * scale;
+    let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+    
+    if (region) {
+      sx = (region.x / 100) * video.videoWidth;
+      sy = (region.y / 100) * video.videoHeight;
+      sw = (region.width / 100) * video.videoWidth;
+      sh = (region.height / 100) * video.videoHeight;
+      
+      sx = Math.max(0, sx); sy = Math.max(0, sy);
+      sw = Math.min(sw, video.videoWidth - sx);
+      sh = Math.min(sh, video.videoHeight - sy);
+    }
 
-    // Draw with scaling and high quality sharpening
+    // [ZenLens 30.11] Aether Optimizer:
+    // Scale image for AI (1024px max) to prevent bandwidth bottleneck
+    const aiScale = isAether ? Math.min(1.0, 1024 / sw) : 2.0;
+    canvas.width = Math.max(64, sw * aiScale); 
+    canvas.height = Math.max(64, sh * aiScale);
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // Apply Preprocessing Filters (Adaptive Thresholding)
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // 1. Grayscale Conversion
-    const grayscale = new Uint8Array(width * height);
-    for (let i = 0; i < data.length; i += 4) {
-      grayscale[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    }
-
-    // 2. Adaptive Thresholding (Mean-C)
-    // We use a simpler block-average to keep it fast in pure JS
-    const blockSize = 15; // Local area size
-    const C = 10; // Constant delta
     
-    const output = new Uint8ClampedArray(data.length);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = y * width + x;
-        const currentPixel = grayscale[idx];
-        
-        // Dynamic Thresholding (Sampled block average for speed)
-        let sum = 0;
-        let count = 0;
-        const half = 7; // blockSize/2
-        
-        // Performance-first sampling (Skip 2 to handle resolution)
-        for (let dy = -half; dy <= half; dy += 2) {
-          for (let dx = -half; dx <= half; dx += 2) {
-            const ny = y + dy;
-            const nx = x + dx;
-            if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-              sum += grayscale[ny * width + nx];
-              count++;
-            }
-          }
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    
+    // [ZenLens 30.18] Relaxed Mode: Force PNG for better WASM compatibility
+    const dataUrl = canvas.toDataURL('image/png');
+
+    // Black Frame Detection & In-App Alerts
+    const sampleSize = 20;
+    const checkData = context.getImageData(0, 0, sampleSize, sampleSize).data;
+    let totalBrightness = 0;
+    const pixelCount = sampleSize * sampleSize;
+    
+    for(let i=0; i<checkData.length; i+=4) {
+        const brightness = (checkData[i] + checkData[i+1] + checkData[i+2]) / 3;
+        totalBrightness += brightness;
+    }
+    
+    const averageBrightness = totalBrightness / pixelCount;
+    const isBlack = averageBrightness < 15;
+    
+    if(isBlack && typeof document !== 'undefined') {
+        const thumbContainer = document.getElementById('vision-thumbnail-container');
+        if(thumbContainer) thumbContainer.innerHTML = `<div style="color:#ef4444;font-size:10px;text-align:center;margin-top:20px;font-weight:bold">BLACK FRAME</div>`;
+    } else if(typeof document !== 'undefined') {
+        const thumbContainer = document.getElementById('vision-thumbnail-container');
+        if(thumbContainer && thumbContainer.querySelector('img')) {
+          (thumbContainer.querySelector('img') as HTMLImageElement).src = dataUrl;
+        } else if(thumbContainer) {
+          thumbContainer.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;" />`;
         }
-        
-        const avg = sum / (count || 1);
-        
-        // If current pixel is significantly brighter than local surroundings, its text
-        // (Black text on white background required for Tesseract)
-        const isText = currentPixel > (avg + C);
-        const val = isText ? 0 : 255; 
-        
-        const outIdx = idx * 4;
-        output[outIdx] = val;
-        output[outIdx + 1] = val;
-        output[outIdx + 2] = val;
-        output[outIdx + 3] = 255;
-      }
     }
-    
-    context.putImageData(new ImageData(output, width, height), 0, 0);
-    return canvas.toDataURL('image/png');
+
+    return { dataUrl, isBlack };
   }
 }

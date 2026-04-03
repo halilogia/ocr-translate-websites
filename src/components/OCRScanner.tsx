@@ -1,187 +1,160 @@
-import { Scan, Monitor, X, Play, Pause, AlertCircle } from "lucide-react";
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from "react";
+"use client";
+
+import { useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import { AppSettings } from "@/types";
 import { CaptureService } from "./CaptureLogic";
 
 interface OCRScannerProps {
+  settings: AppSettings;
   onTranscript: (text: string) => void;
   isScanning: boolean;
-  setIsScanning: (val: boolean) => void;
+  setIsScanning: (scanning: boolean) => void;
   sourceLanguage: string;
-  setIsStreamActive: (val: boolean) => void;
+  scanRegion: { x: number, y: number, width: number, height: number } | null;
+  setIsStreamActive: (active: boolean) => void;
 }
 
 export interface OCRScannerRef {
-  selectWindow: () => void;
+  selectWindow: () => Promise<void>;
   openFileUpload: () => void;
 }
 
-const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>(({ onTranscript, isScanning, setIsScanning, sourceLanguage, setIsStreamActive }, ref) => {
-  const [error, setError] = useState<string | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [isAutoScan, setIsAutoScan] = useState(false);
-  
-  const [isSelecting, setIsSelecting] = useState(false);
-  
+const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
+  const { settings, onTranscript, scanRegion, setIsStreamActive } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const autoScanTimer = useRef<NodeJS.Timeout | null>(null);
 
   useImperativeHandle(ref, () => ({
-    selectWindow: () => selectWindow(),
-    openFileUpload: () => fileInputRef.current?.click()
+    selectWindow: async () => {
+      try {
+        console.log("[ZenLens] Requesting Screen Capture...");
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { 
+            displaySurface: 'window',
+            cursor: 'always'
+          } as MediaTrackConstraints,
+          audio: false
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          
+          // [ZenLens 30.17] Dynamic Mirroring
+          videoRef.current.onloadedmetadata = () => {
+            const video = videoRef.current;
+            if (video) {
+              video.style.width = `${video.videoWidth}px`;
+              video.style.height = `${video.videoHeight}px`;
+              console.log("[ZenLens] Signal Lock: Stream Ready", video.videoWidth, "x", video.videoHeight);
+              video.play().catch(e => console.error("Play Failed", e));
+              setIsStreamActive(true);
+            }
+          };
+
+          stream.getVideoTracks()[0].onended = () => {
+            setIsStreamActive(false);
+          };
+        }
+      } catch (err) {
+        console.error("Display Media Error:", err);
+      }
+    },
+    openFileUpload: () => {
+      fileInputRef.current?.click();
+    }
   }));
 
   useEffect(() => {
-    return () => {
-      stopStream();
-    };
-  }, []);
+    let active = true;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    
+    const runCaptureLoop = async () => {
+      if (!active) return;
 
-  const selectWindow = async () => {
-    if (isSelecting) return;
-    setIsSelecting(true);
-    try {
-      const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { 
-          displaySurface: "window"
-        },
-        audio: false
-      });
+      try {
+        if (videoRef.current && canvasRef.current) {
+          const video = videoRef.current;
+          
+          if (video.srcObject && video.videoWidth > 0 && video.readyState >= 2) {
+            const isAether = settings.ocrEngine === 'ollama';
+            const { dataUrl, isBlack } = CaptureService.captureFrame(video, canvasRef.current, scanRegion || undefined, isAether);
+            
+            if (isBlack) {
+              if (active) {
+                const interval = settings.ocrEngine === 'ollama' ? 2000 : 1000;
+                timeoutId = setTimeout(runCaptureLoop, interval);
+              }
+              return;
+            }
+
+            console.log(`[ZenLens] TICK: Dispatched to ${settings.ocrEngine.toUpperCase()}...`);
+            const result = await CaptureService.performOCR(dataUrl, settings);
+            
+            if (result.text && result.text.length > 3) {
+              console.log(`[ZenLens] ${settings.ocrEngine.toUpperCase()} SUCCESS: "${result.text.slice(0, 30)}..." (${result.confidence}%)`);
+              onTranscript(result.text);
+            }
+          }
+        }
+      } catch (err: unknown) {
+        console.error(`[ZenLens] PIPELINE ERROR:`, err);
+      }
       
-      setStream(mediaStream);
-      setIsStreamActive(true);
-      setError(null);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+      if (active) {
+        const interval = settings.ocrEngine === 'ollama' ? 2000 : 1000;
+        timeoutId = setTimeout(runCaptureLoop, interval);
       }
+    };
 
-      mediaStream.getVideoTracks()[0].onended = () => {
-        stopStream();
-      };
-    } catch (err: any) {
-      if (err.name !== 'NotAllowedError') {
-        console.error("Window Selection Error:", err);
-        setError("Failed to access window.");
-      }
-    } finally {
-      setIsSelecting(false);
-    }
-  };
+    runCaptureLoop();
+    return () => { 
+      active = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [settings, scanRegion, onTranscript]);
 
-  const handleFile = (file: File) => {
-    stopStream();
-    if (!file.type.startsWith('image/')) {
-      setError("Please select a valid image file.");
-      return;
-    }
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
     const reader = new FileReader();
-    reader.onload = (e) => startOCR(e.target?.result as string);
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      try {
+        const result = await CaptureService.performOCR(dataUrl, settings);
+        if (result.text) onTranscript(result.text);
+      } catch (err: unknown) { 
+        console.error("File OCR Error:", err); 
+      }
+    };
     reader.readAsDataURL(file);
   };
 
-  const stopStream = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-      setIsStreamActive(false);
-    }
-    setIsAutoScan(false);
-  };
-
-  const startOCR = async (imageSrc: string) => {
-    setIsScanning(true);
-    try {
-      console.log("[Kamui] OCR Process Started (Lang:", sourceLanguage, ")");
-      const result = await CaptureService.performOCR(imageSrc, sourceLanguage);
-      
-      if (result.text && result.text.trim().length > 0) {
-        console.log("[Kamui] Text Detected!", result.text.substring(0, 30) + "...");
-        onTranscript(result.text);
-      } else {
-        console.log("[Kamui] Snapshot Empty: No text detected");
-      }
-    } catch (err) {
-      console.error("[Kamui] OCR Critical Error:", err);
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  const handleManualScan = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const frame = CaptureService.captureFrame(videoRef.current, canvasRef.current);
-    if (frame) startOCR(frame);
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    const runCaptureLoop = async () => {
-      if (!active || !stream) {
-        return;
-      }
-
-      if (isScanning) {
-        console.log("[Kamui] Pipeline Busy: Waiting for current scan to finish...");
-        if (active) setTimeout(runCaptureLoop, 1000);
-        return;
-      }
-
-      if (videoRef.current && canvasRef.current) {
-        const video = videoRef.current;
-        if (video.readyState >= 2 && video.videoWidth > 0) {
-          console.log("[Kamui] Capturing Frame...");
-          const frame = CaptureService.captureFrame(video, canvasRef.current);
-          if (frame) {
-            await startOCR(frame);
-          } else {
-            console.warn("[Kamui] Capture Failed: Empty frame data");
-          }
-        } else {
-          console.log("[Kamui] Waiting for Video Stream: readyState is", video.readyState);
-        }
-      }
-      
-      if (active) setTimeout(runCaptureLoop, 2000);
-    };
-
-    if (stream) {
-      setIsAutoScan(true);
-      runCaptureLoop();
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [stream, sourceLanguage]); // Removed isScanning from deps to prevent re-triggering the loop start
-
   return (
-    <div style={{ 
-      position: 'absolute', 
-      top: -9999, 
-      left: -9999, 
-      opacity: 0, 
-      pointerEvents: 'none',
-      visibility: 'visible',
-      overflow: 'hidden',
-      width: '1px',
-      height: '1px'
-    }}>
-      <video ref={videoRef} autoPlay playsInline muted />
-      <canvas ref={canvasRef} />
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        hidden 
-        accept="image/*" 
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFile(file);
+    <>
+      {/* [ZenLens 30.15] Visible Ghost Strategy: 
+          Placing at 0,0 with near-zero opacity to force the GPU 
+          to keep the rendering buffer active on Linux/Mint. */}
+      <video 
+        ref={videoRef} 
+        style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0,
+          width: '320px', 
+          height: '240px', 
+          opacity: 0.01, 
+          zIndex: -10,
+          pointerEvents: 'none' 
         }} 
+        autoPlay 
+        playsInline 
+        muted 
       />
-    </div>
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
+    </>
   );
 });
 
