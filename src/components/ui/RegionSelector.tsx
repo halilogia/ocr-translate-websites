@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { X, Target, MousePointer2 } from "lucide-react";
 import { ScanRegion } from "@/types";
 
@@ -84,7 +84,7 @@ export default function RegionSelector({ videoStream, onConfirm, onCancel }: Reg
             <Target className="icon-pulse" size={20} color="var(--accent)" />
             <div>
               <h3>Define Scan Region</h3>
-              <p>Drag the mouse over your game's dialogue area</p>
+              <p>Drag the mouse over your game&apos;s dialogue area</p>
             </div>
           </div>
           <button onClick={onCancel} className="icon-btn-s"><X size={18} /></button>

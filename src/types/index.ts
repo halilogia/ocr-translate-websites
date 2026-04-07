@@ -13,7 +13,7 @@ export interface AppSettings {
   engine: 'google' | 'mymemory' | 'ollama' | 'openrouter';
   ocrEngine: 'tesseract' | 'ollama' | 'ocrspace';
   autoScan: boolean;
-  scanRegion: 'full' | 'selected';
+  scanRegion: ScanRegion | null; // null = full screen
   furigana: boolean;
   ollamaModel: string;
   ollamaVisionModel: string;
@@ -22,6 +22,7 @@ export interface AppSettings {
   openRouterModel: string;
   ocrApiKey: string;
   isGameMode?: boolean;
+  autoDetectRegions?: boolean;
 }
 
 export type TesseractWorker = Worker | null;
@@ -41,11 +42,6 @@ export interface ScanRegion {
 export interface TranscriptLine {
   id: string;
   text: string;
-  timestamp: number;
-}
-
-export interface TranscriptLine {
-  id: string;
-  text: string;
+  originalText?: string;
   timestamp: number;
 }

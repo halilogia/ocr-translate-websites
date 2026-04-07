@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 interface TranslationDisplayProps {
   text: string;
+  originalText?: string;
   isScanning: boolean;
   isStreamActive: boolean;
   onCopy: (text: string) => void;
@@ -12,19 +13,25 @@ interface TranslationDisplayProps {
   onSelectWindow: () => void;
   onUploadImage: () => void;
   onDefineRegion: () => void;
+  onToggleHistory: () => void;
+  historyCount: number;
 }
 
 export default function TranslationDisplay({ 
   text, 
+  originalText,
   isScanning, 
   isStreamActive,
   onCopy, 
   onSpeak, 
   onSelectWindow, 
   onUploadImage,
-  onDefineRegion
+  onDefineRegion,
+  onToggleHistory,
+  historyCount
 }: TranslationDisplayProps) {
   const lines = text ? text.split('\n').filter(l => l.trim()) : [];
+  const originalLines = originalText ? originalText.split('\n').filter(l => l.trim()) : [];
 
   return (
     <div className="translation-display" style={{
@@ -91,6 +98,17 @@ export default function TranslationDisplay({
               >
                 <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: '2rem', lineHeight: '1', fontWeight: 300, marginTop: '8px' }}>—</span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {originalLines[index] && (
+                    <p style={{ 
+                      fontSize: '1rem', 
+                      fontWeight: 400, 
+                      lineHeight: '1.3', 
+                      color: 'rgba(255,255,255,0.5)',
+                      marginBottom: '-4px'
+                    }}>
+                      {originalLines[index]}
+                    </p>
+                  )}
                   <h2 style={{ 
                     fontSize: '2.5rem', 
                     fontWeight: 700, 
@@ -102,6 +120,31 @@ export default function TranslationDisplay({
                   <div style={{ display: 'flex', gap: '16px', opacity: 0.4 }} className="row-actions">
                     <button onClick={() => onSpeak(line)} className="icon-btn-ghost"><Volume2 size={24} /></button>
                     <button onClick={() => onCopy(line)} className="icon-btn-ghost"><Copy size={24} /></button>
+                    <button onClick={onToggleHistory} className="icon-btn-ghost" title="History" style={{ position: 'relative' }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                      {historyCount > 0 && (
+                        <span style={{
+                          position: 'absolute',
+                          top: '-4px',
+                          right: '-4px',
+                          background: 'var(--accent)',
+                          color: 'black',
+                          fontSize: '10px',
+                          fontWeight: 900,
+                          width: '16px',
+                          height: '16px',
+                          borderRadius: '50%',
+                          display: 'grid',
+                          placeItems: 'center'
+                        }}>{historyCount}</span>
+                      )}
+                    </button>
+                    <button onClick={onDefineRegion} className="icon-btn-ghost" title="Define Scan Region">
+                      <Target size={24} />
+                    </button>
                   </div>
                 </div>
               </motion.div>

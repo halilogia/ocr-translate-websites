@@ -5,9 +5,11 @@ import { AppSettings } from "@/types";
 interface SettingsTrayProps {
   settings: AppSettings;
   updateSettings: (newSettings: Partial<AppSettings>) => void;
+  onSelectWindow?: () => void;
+  onSelectRegion?: () => void;
 }
 
-export default function SettingsTray({ settings, updateSettings }: SettingsTrayProps) {
+export default function SettingsTray({ settings, updateSettings, onSelectWindow, onSelectRegion }: SettingsTrayProps) {
   const [ollamaOptions, setOllamaOptions] = useState<{value: string, label: string}[]>([]);
 
   useEffect(() => {
@@ -90,7 +92,7 @@ export default function SettingsTray({ settings, updateSettings }: SettingsTrayP
           label="TRANSLATE ENGINE"
           value={settings.engine}
           options={engineOptions}
-          onChange={(val) => updateSettings({ engine: val as any })}
+          onChange={(val) => updateSettings({ engine: val as AppSettings['engine'] })}
         />
 
         <div style={{ height: '24px', width: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
@@ -99,7 +101,7 @@ export default function SettingsTray({ settings, updateSettings }: SettingsTrayP
           label="VISION"
           value={settings.ocrEngine}
           options={ocrOptions}
-          onChange={(val) => updateSettings({ ocrEngine: val as any })}
+          onChange={(val) => updateSettings({ ocrEngine: val as AppSettings['ocrEngine'] })}
         />
 
         {settings.ocrEngine === 'ollama' && (
@@ -147,6 +149,94 @@ export default function SettingsTray({ settings, updateSettings }: SettingsTrayP
             onChange={(e) => updateSettings({ openRouterKey: e.target.value })}
           />
         )}
+
+        <div style={{ height: '24px', width: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+
+        {onSelectWindow && (
+          <button
+            onClick={onSelectWindow}
+            style={{
+              background: 'rgba(0, 245, 212, 0.1)',
+              border: '1px solid rgba(0, 245, 212, 0.3)',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: '#00f5d4',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              height: '42px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            CHANGE WINDOW
+          </button>
+        )}
+
+        {onSelectRegion && (
+          <button
+            onClick={onSelectRegion}
+            style={{
+              background: settings.scanRegion ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+              border: settings.scanRegion ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: '12px',
+              padding: '8px 16px',
+              color: settings.scanRegion ? '#a855f7' : 'rgba(255, 255, 255, 0.6)',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              height: '42px',
+              whiteSpace: 'nowrap'
+            }}
+            title="Ekranda OCR taraması yapılacak bölgeyi seçin"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>
+            </svg>
+            {settings.scanRegion ? 'REGION SET' : 'SELECT REGION'}
+          </button>
+        )}
+
+        <button
+          onClick={() => updateSettings({ autoDetectRegions: !settings.autoDetectRegions })}
+          style={{
+            background: settings.autoDetectRegions ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+            border: settings.autoDetectRegions ? '1px solid rgba(34, 197, 94, 0.5)' : '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '12px',
+            padding: '8px 16px',
+            color: settings.autoDetectRegions ? '#22c55e' : 'rgba(255, 255, 255, 0.6)',
+            fontSize: '12px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            height: '42px',
+            whiteSpace: 'nowrap'
+          }}
+          title="Otomatik olarak ekrandaki metin bölgelerini tespit eder ve sadece o alanları OCR ile tarar"
+        >
+          <div style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: settings.autoDetectRegions ? '#22c55e' : 'rgba(255, 255, 255, 0.3)'
+          }} />
+          AUTO-REGIONS
+        </button>
       </div>
 
       <style jsx>{`

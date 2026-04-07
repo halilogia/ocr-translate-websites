@@ -10,13 +10,12 @@ import { OCRScannerRef } from "./OCRScanner";
 import { motion } from "framer-motion";
 
 const DEFAULT_SETTINGS: AppSettings = {
-  translationMode: false,
   sourceLanguage: 'eng',
   targetLanguage: 'tr',
   engine: 'google',
   ocrEngine: 'tesseract',
   autoScan: false,
-  scanRegion: 'full',
+  scanRegion: null, // null = full screen
   furigana: false,
   ollamaModel: '',
   ollamaVisionModel: '',
@@ -27,47 +26,106 @@ const DEFAULT_SETTINGS: AppSettings = {
   isGameMode: false
 };
 
+// Helper function to load settings from localStorage
+function loadInitialSettings(): AppSettings {
+  const saved = localStorage.getItem('zenlens-v1-settings');
+  let initialSettings = DEFAULT_SETTINGS;
+  
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.ollamaVisionModel === 'llava') parsed.ollamaVisionModel = '';
+      initialSettings = { ...DEFAULT_SETTINGS, ...parsed };
+    } catch (e: unknown) {
+      console.error("Settings load failed:", e);
+    }
+  }
+  
+  return initialSettings;
+}
+
 export default function ZenLensApp() {
-  const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState("translator");
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
   const [isScanning, setIsScanning] = useState(false);
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptLine[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showRegionSelector, setShowRegionSelector] = useState(false);
+  const [isSelectingRegion, setIsSelectingRegion] = useState(false);
+  const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
+  const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
+  const overlayRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<OCRScannerRef | null>(null);
+  const isMountedRef = useRef(false);
 
-  // Persistence & Purge
+  // Track mounted state via ref (no setState call)
   useEffect(() => {
-    const saved = localStorage.getItem('zenlens-v1-settings');
-    let initialSettings = DEFAULT_SETTINGS;
-    
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.ollamaVisionModel === 'llava') parsed.ollamaVisionModel = '';
-        initialSettings = { ...DEFAULT_SETTINGS, ...parsed };
-      } catch (e: unknown) {
-        console.error("Settings load failed:", e);
-      }
-    }
-    
-    setSettings(initialSettings);
-    setMounted(true);
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
   }, []);
 
+  // Persist settings to localStorage
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem('zenlens-v1-settings', JSON.stringify(settings));
-    }
-  }, [settings, mounted]);
+    localStorage.setItem('zenlens-v1-settings', JSON.stringify(settings));
+  }, [settings]);
 
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
   }, []);
 
+  const handleSelectRegion = useCallback(() => {
+    if (isStreamActive) {
+      setIsSelectingRegion(true);
+    } else {
+      alert("Please start screen sharing first by clicking 'CHANGE WINDOW'");
+    }
+  }, [isStreamActive]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!overlayRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+    setSelectionStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setSelectionEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isSelectingRegion || !overlayRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+    setSelectionEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }, [isSelectingRegion]);
+
+  const handleMouseUp = useCallback(() => {
+    if (!isSelectingRegion || !overlayRef.current) return;
+    
+    const rect = overlayRef.current.getBoundingClientRect();
+    const x = Math.min(selectionStart.x, selectionEnd.x);
+    const y = Math.min(selectionStart.y, selectionEnd.y);
+    const width = Math.abs(selectionEnd.x - selectionStart.x);
+    const height = Math.abs(selectionEnd.y - selectionStart.y);
+
+    if (width > 20 && height > 20) {
+      updateSettings({
+        scanRegion: {
+          x: (x / rect.width) * 100,
+          y: (y / rect.height) * 100,
+          width: (width / rect.width) * 100,
+          height: (height / rect.height) * 100
+        }
+      });
+    }
+    
+    setIsSelectingRegion(false);
+  }, [isSelectingRegion, selectionStart, selectionEnd, updateSettings]);
+
+  const clearRegion = useCallback(() => {
+    updateSettings({ scanRegion: null });
+  }, [updateSettings]);
+
   const [lastProcessedText, setLastProcessedText] = useState<string>('');
   const [lastProcessedTime, setLastProcessedTime] = useState<number>(0);
   const transcriptHistoryRef = useRef<string[]>([]);
+  const hasRunRef = useRef(false);
 
   const textSimilarity = (a: string, b: string): number => {
     const longer = a.length > b.length ? a : b;
@@ -91,66 +149,35 @@ export default function ZenLensApp() {
   const addTranscript = useCallback(async (text: string) => {
     if (!text.trim()) return;
     
+    // Prevent double execution from React StrictMode
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+    setTimeout(() => { hasRunRef.current = false; }, 100);
+    
     const trimmedText = text.trim();
     const now = Date.now();
     
-    // 1. Exact duplicate check against last processed
-    if (trimmedText === lastProcessedText) {
-      return;
-    }
+    // 1. Exact duplicate check
+    if (trimmedText === lastProcessedText) return;
     
-    // 2. Similarity check: if text is >85% similar to last AND within 10 seconds, skip
+    // 2. Similarity check within 10 seconds
     if (lastProcessedText && (now - lastProcessedTime < 10000)) {
       const similarity = textSimilarity(trimmedText, lastProcessedText);
-      if (similarity > 0.85) {
-        console.log(`[ZenLens] Duplicate filtered (${Math.round(similarity*100)}% similar)`);
-        return;
-      }
+      if (similarity > 0.85) return;
     }
     
-    // 3. Check against history using ref
+    // 3. History check
     const isDuplicate = transcriptHistoryRef.current.some(existingText => {
       return textSimilarity(trimmedText, existingText) > 0.9;
     });
-    if (isDuplicate) {
-      console.log('[ZenLens] Duplicate filtered (found in history)');
-      return;
-    }
+    if (isDuplicate) return;
     
     // Update tracking
     setLastProcessedText(trimmedText);
     setLastProcessedTime(now);
     transcriptHistoryRef.current = [...transcriptHistoryRef.current, trimmedText].slice(-20);
     
-    // Add transcript
-    setTranscripts(prev => {
-      const newLine: TranscriptLine = {
-        id: Date.now().toString(),
-        text: trimmedText,
-        timestamp: now
-      };
-      return [...prev, newLine].slice(-10);
-    });
-    if (isDuplicate) {
-      console.log('[ZenLens] Duplicate filtered (found in history)');
-      return;
-    }
-    
-    // Update tracking
-    setLastProcessedText(trimmedText);
-    setLastProcessedTime(now);
-    
-    // Add transcript
-    setTranscripts(prev => {
-      const newLine: TranscriptLine = {
-        id: Date.now().toString(),
-        text: trimmedText,
-        timestamp: now
-      };
-      return [...prev, newLine].slice(-10);
-    });
-    
-    // Translation
+    // ONLY fetch translation and store it (no original text)
     if (settings.engine) {
       try {
         const fromLang = settings.sourceLanguage === 'eng' ? 'en' : 
@@ -174,8 +201,6 @@ export default function ZenLensApp() {
           openRouterModel: settings.openRouterModel
         };
 
-        console.log('[ZenLens] Translation Payload:', JSON.stringify(payload, null, 2));
-
         const response = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -185,13 +210,15 @@ export default function ZenLensApp() {
         if (response.ok) {
           const data = await response.json();
           if (data.translatedText) {
+            // Store both original and translated text
             setTranscripts(prev => {
-              const updated = prev.map(t => 
-                t.text === trimmedText 
-                  ? { ...t, text: `${trimmedText}\n→ ${data.translatedText}` }
-                  : t
-              );
-              return updated;
+              const newLine: TranscriptLine = {
+                id: Date.now().toString(),
+                text: data.translatedText,
+                originalText: trimmedText,
+                timestamp: now
+              };
+              return [...prev, newLine].slice(-10);
             });
           }
         } else {
@@ -203,18 +230,21 @@ export default function ZenLensApp() {
         console.error('[ZenLens] Translation failed:', errorMessage);
       }
     }
-  }, [settings.engine, settings.sourceLanguage, settings.targetLanguage, settings.ollamaTranslationModel, settings.openRouterKey, settings.openRouterModel, lastProcessedText, lastProcessedTime]);
+  }, [lastProcessedText, lastProcessedTime, settings.engine, settings.sourceLanguage, settings.targetLanguage, settings.ollamaTranslationModel, settings.ollamaVisionModel, settings.openRouterKey, settings.openRouterModel]);
 
-  if (!mounted) return null;
+  // SSR safety: loadInitialSettings handles localStorage check
+  // No need to block render since we're in a "use client" component
 
   const renderContent = () => {
     switch (activeTab) {
       case "translator":
       case "scanner":
+        const latestTranscript = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null;
         return (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
              <TranslationDisplay 
-                text={transcripts.map(t => t.text).join('\n')}
+                text={latestTranscript ? latestTranscript.text : ''}
+                originalText={latestTranscript?.originalText}
                 isScanning={isScanning}
                 isStreamActive={isStreamActive}
                 onCopy={(text) => navigator.clipboard.writeText(text)}
@@ -225,20 +255,103 @@ export default function ZenLensApp() {
                 }}
                 onSelectWindow={() => scannerRef.current?.selectWindow()}
                 onUploadImage={() => scannerRef.current?.openFileUpload()}
-                onDefineRegion={() => {}}
+                onDefineRegion={() => {
+                  // Simple region definition: prompt user for coordinates
+                  const x = prompt('Enter X coordinate (0-100):', '0');
+                  const y = prompt('Enter Y coordinate (0-100):', '0');
+                  const w = prompt('Enter Width (0-100):', '100');
+                  const h = prompt('Enter Height (0-100):', '100');
+                  if (x !== null && y !== null && w !== null && h !== null) {
+                    updateSettings({
+                      scanRegion: {
+                        x: parseInt(x) || 0,
+                        y: parseInt(y) || 0,
+                        width: parseInt(w) || 100,
+                        height: parseInt(h) || 100
+                      } as unknown as AppSettings['scanRegion']
+                    });
+                  }
+                }}
+                onToggleHistory={() => setShowHistory(!showHistory)}
+                historyCount={transcripts.length}
              />
+             
+             {/* History Panel */}
+             <motion.div
+               initial={{ x: 400 }}
+               animate={{ x: showHistory ? 0 : 400 }}
+               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+               style={{
+                 position: 'absolute',
+                 top: 0,
+                 right: 0,
+                 width: '380px',
+                 height: '100%',
+                 background: 'rgba(10, 10, 12, 0.95)',
+                 borderLeft: '1px solid rgba(255,255,255,0.1)',
+                 backdropFilter: 'blur(20px)',
+                 zIndex: 150,
+                 display: 'flex',
+                 flexDirection: 'column',
+                 overflow: 'hidden'
+               }}
+             >
+               <div style={{ 
+                 padding: '20px 24px', 
+                 borderBottom: '1px solid rgba(255,255,255,0.1)',
+                 display: 'flex',
+                 justifyContent: 'space-between',
+                 alignItems: 'center'
+               }}>
+                 <h3 style={{ fontSize: '1rem', fontWeight: 800, letterSpacing: '0.1em' }}>HISTORY</h3>
+                 <button 
+                   onClick={() => setShowHistory(false)}
+                   style={{ 
+                     background: 'rgba(255,255,255,0.1)', 
+                     border: 'none', 
+                     color: 'white', 
+                     cursor: 'pointer',
+                     padding: '6px 10px',
+                     borderRadius: '8px',
+                     fontSize: '12px'
+                   }}
+                 >✕</button>
+               </div>
+               <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+                 {transcripts.length === 0 ? (
+                   <div style={{ textAlign: 'center', opacity: 0.3, padding: '40px', fontSize: '14px' }}>No history yet</div>
+                 ) : (
+                   [...transcripts].reverse().map((line) => (
+                     <div 
+                       key={line.id} 
+                       style={{ 
+                         padding: '16px', 
+                         marginBottom: '12px',
+                         background: 'rgba(255,255,255,0.03)',
+                         borderRadius: '12px',
+                         border: '1px solid rgba(255,255,255,0.05)'
+                       }}
+                     >
+                       <p style={{ fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '8px' }}>{line.text}</p>
+                       <span style={{ fontSize: '0.7rem', opacity: 0.4 }}>{new Date(line.timestamp).toLocaleTimeString()}</span>
+                     </div>
+                   ))
+                 )}
+               </div>
+             </motion.div>
              
              {/* Neural Feed Debug Box */}
              {!settings.isGameMode && (
                 <div style={{ 
                   position: 'absolute', 
                   bottom: '100px', 
-                  right: '32px',
+                  right: showHistory ? '400px' : '32px',
                   background: 'rgba(0,0,0,0.8)',
                   padding: '8px',
                   borderRadius: '8px',
                   border: '1px solid rgba(255,255,255,0.1)',
-                  zIndex: 200
+                  zIndex: 200,
+                  transition: 'right 0.3s'
                 }}>
                   <div style={{ fontSize: '0.6rem', color: '#71717a', marginBottom: '4px', fontWeight: 800 }}>NEURAL FEED</div>
                   <div id="vision-thumbnail-container" style={{ width: '120px', height: '60px', background: '#000', borderRadius: '4px', overflow: 'hidden' }} />
@@ -303,7 +416,12 @@ export default function ZenLensApp() {
             zIndex: 100
           }}>
             <div style={{ pointerEvents: 'auto' }}>
-              <SettingsTray settings={settings} updateSettings={updateSettings} />
+              <SettingsTray 
+                settings={settings} 
+                updateSettings={updateSettings} 
+                onSelectWindow={() => scannerRef.current?.selectWindow()}
+                onSelectRegion={handleSelectRegion}
+              />
             </div>
           </div>
         )}
@@ -315,9 +433,130 @@ export default function ZenLensApp() {
           isScanning={isScanning} 
           setIsScanning={setIsScanning} 
           sourceLanguage={settings.sourceLanguage}
-          scanRegion={typeof settings.scanRegion === 'string' ? null : settings.scanRegion as unknown as { x: number, y: number, width: number, height: number }}
+          scanRegion={settings.scanRegion}
           setIsStreamActive={setIsStreamActive}
         />
+
+        {/* Region Selection Overlay */}
+        {isSelectingRegion && (
+          <div
+            ref={overlayRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100vw',
+              height: '100vh',
+              zIndex: 9999,
+              cursor: 'crosshair',
+              background: 'rgba(0, 0, 0, 0.3)'
+            }}
+          >
+            {/* Selection rectangle */}
+            {selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y ? (
+              <div style={{
+                position: 'absolute',
+                left: Math.min(selectionStart.x, selectionEnd.x),
+                top: Math.min(selectionStart.y, selectionEnd.y),
+                width: Math.abs(selectionEnd.x - selectionStart.x),
+                height: Math.abs(selectionEnd.y - selectionStart.y),
+                border: '2px solid #a855f7',
+                background: 'rgba(168, 85, 247, 0.2)',
+                boxShadow: '0 0 20px rgba(168, 85, 247, 0.4)'
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  top: -25,
+                  left: 0,
+                  background: '#a855f7',
+                  color: 'white',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap'
+                }}>
+                  SCAN REGION - Release mouse to confirm
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: 'white',
+                fontSize: '18px',
+                fontWeight: 700,
+                textAlign: 'center',
+                textShadow: '0 2px 10px rgba(0,0,0,0.8)'
+              }}>
+                <div style={{ marginBottom: '10px' }}> Drag to select scan region</div>
+                <div style={{ fontSize: '14px', opacity: 0.7 }}>Release mouse to confirm</div>
+              </div>
+            )}
+            
+            {/* Cancel button */}
+            <button
+              onClick={() => setIsSelectingRegion(false)}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'rgba(239, 68, 68, 0.8)',
+                border: 'none',
+                color: 'white',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 700
+              }}
+            >
+              ✕ Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Region indicator */}
+        {settings.scanRegion && !isSelectingRegion && (
+          <div style={{
+            position: 'fixed',
+            bottom: '100px',
+            left: '20px',
+            background: 'rgba(168, 85, 247, 0.2)',
+            border: '1px solid rgba(168, 85, 247, 0.5)',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            color: '#a855f7',
+            fontSize: '12px',
+            fontWeight: 700,
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>📐 Region Active</span>
+            <button
+              onClick={clearRegion}
+              style={{
+                background: 'rgba(239, 68, 68, 0.3)',
+                border: 'none',
+                color: '#ef4444',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 700
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </main>
 
       <style jsx global>{`

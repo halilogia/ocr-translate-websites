@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, Scan, History, Settings, ChevronLeft, ChevronRight, LogOut, Zap } from "lucide-react";
+import { Home, Settings, ChevronLeft, ChevronRight, Zap } from "lucide-react";
 import { useState } from "react";
 
 interface SidebarProps {

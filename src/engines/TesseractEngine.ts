@@ -1,6 +1,6 @@
 "use client";
 
-import { AppSettings } from "@/types";
+import type { Worker } from "tesseract.js";
 
 export interface OCRError {
   code: string;
@@ -14,20 +14,22 @@ export interface TesseractResult {
 }
 
 export class TesseractEngine {
-  private static worker: any = null;
+  private static worker: Worker | null = null;
   private static isInitializing = false;
 
-  private static async initializeWorker(lang: string): Promise<any> {
+  private static async initializeWorker(lang: string): Promise<Worker> {
     if (this.worker) return this.worker;
     if (this.isInitializing) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return this.worker;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (this.worker) return this.worker;
+      throw new Error("Worker initialization failed");
     }
 
     this.isInitializing = true;
     try {
-      const { createWorker } = await import('tesseract.js');
-      this.worker = await createWorker(lang as any);
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker(lang);
+      this.worker = worker;
       this.isInitializing = false;
       return this.worker;
     } catch (error) {
@@ -36,7 +38,10 @@ export class TesseractEngine {
     }
   }
 
-  static async performOCR(imageSrc: string, lang: string): Promise<TesseractResult> {
+  static async performOCR(
+    imageSrc: string,
+    lang: string,
+  ): Promise<TesseractResult> {
     if (!imageSrc || imageSrc === "data:,") {
       return { text: "", confidence: 0 };
     }
@@ -46,22 +51,23 @@ export class TesseractEngine {
       const { data } = await worker.recognize(imageSrc);
 
       if (data.text && data.text.trim().length > 2 && data.confidence > 20) {
-        const cleanText = data.text.replace(/[%|{}[\]\\/]/g, '').trim();
+        const cleanText = data.text.replace(/[%|{}[\]\\/]/g, "").trim();
         if (cleanText.length < 2) return { text: "", confidence: 0 };
 
         return {
           text: cleanText,
-          confidence: data.confidence
+          confidence: data.confidence,
         };
       }
 
       return { text: "", confidence: 0 };
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
       throw {
-        code: 'TESSERACT_ERROR',
-        message: 'Tesseract OCR failed',
-        details: errorMessage
+        code: "TESSERACT_ERROR",
+        message: "Tesseract OCR failed",
+        details: errorMessage,
       } as OCRError;
     }
   }

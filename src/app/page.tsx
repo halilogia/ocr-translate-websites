@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect } from 'react';
 
 // [ZenLens 30.4] Atomic Hydration Fix:
 // Force the entire application to only render on the client side.

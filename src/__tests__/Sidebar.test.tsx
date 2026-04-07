@@ -22,7 +22,7 @@ describe("Sidebar", () => {
   });
 
   test("collapses when the collapse button is clicked", () => {
-    const { rerender } = render(<Sidebar activeTab="translator" setActiveTab={mockSetActiveTab} />);
+    render(<Sidebar activeTab="translator" setActiveTab={mockSetActiveTab} />);
     const collapseButton = screen.getByText("Collapse").closest("button");
     if (collapseButton) {
       fireEvent.click(collapseButton);
