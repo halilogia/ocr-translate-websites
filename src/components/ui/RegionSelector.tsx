@@ -77,8 +77,9 @@ export default function RegionSelector({ videoStream, onConfirm, onCancel }: Reg
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="region-selector-overlay"
+      onClick={(e) => e.stopPropagation()}
     >
-      <div className="selector-container glass">
+      <div className="selector-container glass" onClick={(e) => e.stopPropagation()}>
         <div className="selector-header">
           <div className="header-info">
             <Target className="icon-pulse" size={20} color="var(--accent)" />

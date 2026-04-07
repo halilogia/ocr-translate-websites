@@ -14,6 +14,7 @@ interface OCRScannerProps {
   sourceLanguage: string;
   scanRegion: { x: number, y: number, width: number, height: number } | null;
   setIsStreamActive: (active: boolean) => void;
+  onStreamChange?: (stream: MediaStream | null) => void;
 }
 
 export interface OCRScannerRef {
@@ -23,7 +24,7 @@ export interface OCRScannerRef {
 }
 
 const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
-  const { settings, onTranscript, scanRegion, setIsStreamActive } = props;
+  const { settings, onTranscript, scanRegion, setIsStreamActive, onStreamChange } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -100,6 +101,9 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
         
         currentStreamRef.current = stream;
         
+        // Notify parent about stream change
+        onStreamChange?.(stream);
+        
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -116,6 +120,7 @@ const OCRScanner = forwardRef<OCRScannerRef, OCRScannerProps>((props, ref) => {
             console.log("[ZenLens] Stream ended by user");
             currentStreamRef.current = null;
             setIsStreamActive(false);
+            onStreamChange?.(null);
           };
         }
       } catch (err: unknown) {

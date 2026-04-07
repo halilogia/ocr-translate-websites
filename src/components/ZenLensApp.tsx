@@ -5,9 +5,10 @@ import Sidebar from "./Sidebar";
 import TranslationDisplay from "./workspace/TranslationDisplay";
 import SettingsTray from "./panels/SettingsTray";
 import OCRScanner from "./OCRScanner";
-import { AppSettings, TranscriptLine } from "@/types";
+import RegionSelector from "./ui/RegionSelector";
+import { AppSettings, TranscriptLine, ScanRegion } from "@/types";
 import { OCRScannerRef } from "./OCRScanner";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 const DEFAULT_SETTINGS: AppSettings = {
   sourceLanguage: 'eng',
@@ -51,11 +52,8 @@ export default function ZenLensApp() {
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptLine[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [showRegionSelector, setShowRegionSelector] = useState(false);
   const [isSelectingRegion, setIsSelectingRegion] = useState(false);
-  const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
-  const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const scannerRef = useRef<OCRScannerRef | null>(null);
   const isMountedRef = useRef(false);
 
@@ -75,52 +73,39 @@ export default function ZenLensApp() {
   }, []);
 
   const handleSelectRegion = useCallback(() => {
-    if (isStreamActive) {
+    if (isStreamActive && videoStream) {
+      setShowHistory(false); // Close history panel when opening region selector
       setIsSelectingRegion(true);
     } else {
       alert("Please start screen sharing first by clicking 'CHANGE WINDOW'");
     }
-  }, [isStreamActive]);
+  }, [isStreamActive, videoStream]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!overlayRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    setSelectionStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    setSelectionEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  const handleRegionConfirm = useCallback((region: ScanRegion) => {
+    updateSettings({ scanRegion: region });
+    setIsSelectingRegion(false);
+  }, [updateSettings]);
+
+  const handleRegionCancel = useCallback(() => {
+    setIsSelectingRegion(false);
   }, []);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isSelectingRegion || !overlayRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    setSelectionEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-  }, [isSelectingRegion]);
-
-  const handleMouseUp = useCallback(() => {
-    if (!isSelectingRegion || !overlayRef.current) return;
-    
-    const rect = overlayRef.current.getBoundingClientRect();
-    const x = Math.min(selectionStart.x, selectionEnd.x);
-    const y = Math.min(selectionStart.y, selectionEnd.y);
-    const width = Math.abs(selectionEnd.x - selectionStart.x);
-    const height = Math.abs(selectionEnd.y - selectionStart.y);
-
-    if (width > 20 && height > 20) {
-      updateSettings({
-        scanRegion: {
-          x: (x / rect.width) * 100,
-          y: (y / rect.height) * 100,
-          width: (width / rect.width) * 100,
-          height: (height / rect.height) * 100
-        }
-      });
-    }
-    
-    setIsSelectingRegion(false);
-  }, [isSelectingRegion, selectionStart, selectionEnd, updateSettings]);
+  const handleStreamChange = useCallback((stream: MediaStream | null) => {
+    setVideoStream(stream);
+  }, []);
 
   const clearRegion = useCallback(() => {
     updateSettings({ scanRegion: null });
   }, [updateSettings]);
+
+  // Clean up stream on unmount
+  useEffect(() => {
+    return () => {
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [videoStream]);
 
   const [lastProcessedText, setLastProcessedText] = useState<string>('');
   const [lastProcessedTime, setLastProcessedTime] = useState<number>(0);
@@ -256,46 +241,34 @@ export default function ZenLensApp() {
                 onSelectWindow={() => scannerRef.current?.selectWindow()}
                 onUploadImage={() => scannerRef.current?.openFileUpload()}
                 onDefineRegion={() => {
-                  // Simple region definition: prompt user for coordinates
-                  const x = prompt('Enter X coordinate (0-100):', '0');
-                  const y = prompt('Enter Y coordinate (0-100):', '0');
-                  const w = prompt('Enter Width (0-100):', '100');
-                  const h = prompt('Enter Height (0-100):', '100');
-                  if (x !== null && y !== null && w !== null && h !== null) {
-                    updateSettings({
-                      scanRegion: {
-                        x: parseInt(x) || 0,
-                        y: parseInt(y) || 0,
-                        width: parseInt(w) || 100,
-                        height: parseInt(h) || 100
-                      } as unknown as AppSettings['scanRegion']
-                    });
-                  }
+                  setShowHistory(false); // Close history panel when opening region selector
+                  handleSelectRegion();
                 }}
                 onToggleHistory={() => setShowHistory(!showHistory)}
                 historyCount={transcripts.length}
              />
              
-             {/* History Panel */}
-             <motion.div
-               initial={{ x: 400 }}
-               animate={{ x: showHistory ? 0 : 400 }}
-               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-               style={{
-                 position: 'absolute',
-                 top: 0,
-                 right: 0,
-                 width: '380px',
-                 height: '100%',
-                 background: 'rgba(10, 10, 12, 0.95)',
-                 borderLeft: '1px solid rgba(255,255,255,0.1)',
-                 backdropFilter: 'blur(20px)',
-                 zIndex: 150,
-                 display: 'flex',
-                 flexDirection: 'column',
-                 overflow: 'hidden'
-               }}
-             >
+              {/* History Panel - Hidden when region selector is active */}
+              {!isSelectingRegion && (
+              <motion.div
+                initial={{ x: 400 }}
+                animate={{ x: showHistory ? 0 : 400 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  width: '380px',
+                  height: '100%',
+                  background: 'rgba(10, 10, 12, 0.95)',
+                  borderLeft: '1px solid rgba(255,255,255,0.1)',
+                  backdropFilter: 'blur(20px)',
+                  zIndex: 150,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden'
+                }}
+              >
                <div style={{ 
                  padding: '20px 24px', 
                  borderBottom: '1px solid rgba(255,255,255,0.1)',
@@ -337,10 +310,11 @@ export default function ZenLensApp() {
                      </div>
                    ))
                  )}
-               </div>
-             </motion.div>
-             
-             {/* Neural Feed Debug Box */}
+                </div>
+              </motion.div>
+              )}
+              
+              {/* Neural Feed Debug Box */}
              {!settings.isGameMode && (
                 <div style={{ 
                   position: 'absolute', 
@@ -435,91 +409,19 @@ export default function ZenLensApp() {
           sourceLanguage={settings.sourceLanguage}
           scanRegion={settings.scanRegion}
           setIsStreamActive={setIsStreamActive}
+          onStreamChange={handleStreamChange}
         />
 
-        {/* Region Selection Overlay */}
-        {isSelectingRegion && (
-          <div
-            ref={overlayRef}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100vw',
-              height: '100vh',
-              zIndex: 9999,
-              cursor: 'crosshair',
-              background: 'rgba(0, 0, 0, 0.3)'
-            }}
-          >
-            {/* Selection rectangle */}
-            {selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y ? (
-              <div style={{
-                position: 'absolute',
-                left: Math.min(selectionStart.x, selectionEnd.x),
-                top: Math.min(selectionStart.y, selectionEnd.y),
-                width: Math.abs(selectionEnd.x - selectionStart.x),
-                height: Math.abs(selectionEnd.y - selectionStart.y),
-                border: '2px solid #a855f7',
-                background: 'rgba(168, 85, 247, 0.2)',
-                boxShadow: '0 0 20px rgba(168, 85, 247, 0.4)'
-              }}>
-                <div style={{
-                  position: 'absolute',
-                  top: -25,
-                  left: 0,
-                  background: '#a855f7',
-                  color: 'white',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap'
-                }}>
-                  SCAN REGION - Release mouse to confirm
-                </div>
-              </div>
-            ) : (
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                color: 'white',
-                fontSize: '18px',
-                fontWeight: 700,
-                textAlign: 'center',
-                textShadow: '0 2px 10px rgba(0,0,0,0.8)'
-              }}>
-                <div style={{ marginBottom: '10px' }}> Drag to select scan region</div>
-                <div style={{ fontSize: '14px', opacity: 0.7 }}>Release mouse to confirm</div>
-              </div>
-            )}
-            
-            {/* Cancel button */}
-            <button
-              onClick={() => setIsSelectingRegion(false)}
-              style={{
-                position: 'absolute',
-                top: '20px',
-                right: '20px',
-                background: 'rgba(239, 68, 68, 0.8)',
-                border: 'none',
-                color: 'white',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 700
-              }}
-            >
-              ✕ Cancel
-            </button>
-          </div>
-        )}
+        {/* Region Selection Overlay - Shows the shared screen video stream */}
+        <AnimatePresence>
+          {isSelectingRegion && videoStream && (
+            <RegionSelector
+              videoStream={videoStream}
+              onConfirm={handleRegionConfirm}
+              onCancel={handleRegionCancel}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Region indicator */}
         {settings.scanRegion && !isSelectingRegion && (

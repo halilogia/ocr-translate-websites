@@ -19,16 +19,19 @@ export default function Home() {
   const scannerRef = useRef<OCRScannerRef>(null);
 
   const [settings, setSettings] = useState<AppSettings>({
-    translationMode: true,
     sourceLanguage: 'eng',
     targetLanguage: 'tr',
     engine: 'google',
+    ocrEngine: 'tesseract',
     autoScan: false,
-    scanRegion: 'full',
+    scanRegion: null,
     furigana: false,
     ollamaModel: 'llama3',
+    ollamaVisionModel: '',
+    ollamaTranslationModel: '',
     openRouterKey: '',
-    openRouterModel: 'neversleep/llama-3-lumimaid-8b:extended'
+    openRouterModel: 'neversleep/llama-3-lumimaid-8b:extended',
+    ocrApiKey: ''
   });
 
   const handleTranscript = async (text: string) => {
@@ -96,6 +99,9 @@ export default function Home() {
               onSpeak={speakText} 
               onSelectWindow={() => scannerRef.current?.selectWindow()}
               onUploadImage={() => scannerRef.current?.openFileUpload()}
+              onDefineRegion={() => {}}
+              onToggleHistory={() => {}}
+              historyCount={0}
             />
           </div>
         );
@@ -283,10 +289,12 @@ export default function Home() {
 
         <OCRScanner 
           ref={scannerRef}
+          settings={settings}
           onTranscript={handleTranscript} 
           isScanning={isScanning} 
           setIsScanning={setIsScanning} 
           sourceLanguage={settings.sourceLanguage}
+          scanRegion={settings.scanRegion}
           setIsStreamActive={setIsStreamActive}
         />
       </main>
