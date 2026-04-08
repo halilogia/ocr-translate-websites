@@ -9,9 +9,11 @@ export async function POST(req: Request) {
       to = 'tr', 
       engine = 'google', 
       ollamaModel, 
-      openRouterKey, 
+      openRouterKey: requestOpenRouterKey, 
       openRouterModel 
     } = await req.json();
+
+    const openRouterKey = requestOpenRouterKey || process.env.OPENROUTER_API_KEY;
     
     if (!text) {
       return NextResponse.json({ error: 'Text is required' }, { status: 400 });
